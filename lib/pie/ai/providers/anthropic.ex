@@ -65,6 +65,7 @@ defmodule Pie.AI.Providers.Anthropic do
     receive do
       {:http, {^id, :stream_end, _}} -> {:halt, %{s | request: nil}}
       {:http, {^id, {:error, _}}} -> {:halt, %{s | request: nil}}
+      {:http, {^id, :stream, _trailing_chunk}} -> {[], s}
     after
       5_000 -> {:halt, s}
     end
@@ -106,7 +107,7 @@ defmodule Pie.AI.Providers.Anthropic do
 
   defp flush(id) do
     receive do
-      {:http, {^id, _}} -> flush(id)
+      {:http, message} when elem(message, 0) == id -> flush(id)
     after
       0 -> :ok
     end

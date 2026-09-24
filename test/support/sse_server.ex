@@ -6,7 +6,9 @@ defmodule Pie.Test.SSEServer do
   """
 
   def start(handler) do
-    {:ok, listen} = :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true])
+    {:ok, listen} =
+      :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true, nodelay: true])
+
     {:ok, port} = :inet.port(listen)
     pid = spawn_link(fn -> accept_loop(listen, handler) end)
     :ok = :gen_tcp.controlling_process(listen, pid)
@@ -50,6 +52,11 @@ defmodule Pie.Test.SSEServer do
       socket,
       "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n"
     )
+
+    # :httpc does not stream body bytes that arrive in the same read as the
+    # headers until more data comes (httpc_handler:handle_http_body/2), so let
+    # the headers go out alone to keep timing-sensitive tests deterministic.
+    Process.sleep(20)
 
     Enum.each(parts, fn
       {:sleep, ms} ->

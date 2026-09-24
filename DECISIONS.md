@@ -137,3 +137,122 @@ results whose call is gone. Pi does the same in `transformMessages`.
 
 **Consequences.** The log stays complete and honest, and only the projection
 sent to the model is cleaned. A crash can never poison a session.
+
+---
+
+## D-008 · The loop is a plain function; the runtime owns the process
+
+**Context.** Pi's `agentLoop` is a function over a context and a config
+(`convertToLlm`, `transformContext`, `getSteeringMessages`, ...), separate
+from the stateful `Agent` class that runs it.
+
+**Decision.** `Pie.Agent.Loop.run(prompts, history, config)` is a plain,
+synchronous function that returns the messages it added. It touches the
+outside world only through `Config` callbacks: `emit`, `steering`,
+`follow_up`, `before_tool_call`, `transform_context`. It doesn't know whether
+it runs in a test process, a `Task`, or an agent.
+
+**Consequences.** Tests exercise it directly with the Faux provider. Layer 3
+supplies callbacks that talk to a GenServer, and the loop's code doesn't
+change. The loop keeps its own copy of the history for the length of a run,
+so the runtime must never change history mid-run (compaction only happens
+while idle).
+
+---
+
+## D-009 · Every tool call gets exactly one result, committed in call order
+
+**Context.** A tool call without a result makes the next request invalid, and
+real runs produce every failure mode: unknown tools, bad arguments, raises,
+hangs, aborts.
+
+**Decision.** The scheduler guarantees one `ToolResultMessage` per call,
+whatever happens: success, validation failure, a gate block, a crash, a
+timeout, an abort (running calls are killed, queued ones are marked
+skipped). Results are appended in call order after the batch finishes, while
+`tool_execution_*` events stream live in completion order.
+
+**Consequences.** Session logs are deterministic regardless of scheduling. A
+result is persisted only when its whole batch completes. A crash mid-batch
+loses the finished results of that batch, and D-007 then fills them in as
+interrupted.
+
+---
+
+## D-010 · A process per tool call; cancellation by killing processes
+
+**Context.** Pi passes an `AbortSignal` into every tool and trusts it to be
+honoured. On the BEAM, a process that should stop can simply be killed, and
+supervision gives isolation for free.
+
+**Decision.** Each call runs in its own process under `Pie.TaskSupervisor`,
+linked to the loop, and the loop traps exits:
+
+* a tool that raises only kills its own process → error result;
+* timeout → `Task.shutdown(task, :brutal_kill)` → error result;
+* abort → the loop kills every running tool;
+* if the loop dies, its linked tools die with it; if the loop's parent (the
+  agent) dies, the loop sees `{:EXIT, parent, _}` and exits.
+
+OS processes are the one thing links cannot reach. The bash tool therefore
+starts a tiny guard process that monitors the tool process and kills the
+command's process group when the tool process dies. OTP already starts port
+programs in their own session (`erl_child_setup` calls `setsid`), so the OS
+pid is the process-group id. Our first attempt wrapped commands in
+`setsid(1)`, which forked and hid the exit status; tests caught it.
+
+Parallelism: tools marked `parallel: true` (read) may run concurrently, up to
+`max_concurrency`. Any other tool acts as a barrier: it waits for everything
+running to finish, then runs alone. Reads fan out; writes and shell commands
+keep their order.
+
+**Consequences.** Tool authors write straight-line code with no cancellation
+checks. The scheduler is a hand-written receive loop (~150 lines), not
+`Task.async_stream`, because it must also react to aborts, timeouts and
+progress messages. It unlinks finished tasks and flushes their exit and
+timer messages so the loop's mailbox stays clean.
+
+---
+
+## D-011 · Validate a small subset of JSON Schema, and report errors to the model
+
+**Context.** Pi validates tool arguments with TypeBox + AJV. Without
+dependencies we would have to write a validator ourselves.
+
+**Decision.** `Pie.Tool.validate/2` checks required properties and primitive
+types (`string`, `integer`, `number`, `boolean`, `array`, `object`), which is
+where models actually go wrong. Violations become an error result naming the
+problem, and the model retries. There is no type coercion.
+
+**Consequences.** Nested schemas, enums and formats aren't enforced; tools
+must still pattern-match defensively on what they need.
+
+---
+
+## D-012 · Four tools, like Pi, with output budgets
+
+**Decision.** `read`, `bash`, `edit`, `write`, and nothing else; `ls`, `grep`,
+`find` and git go through bash. `read` pages at 2000 lines / 50KB and tells
+the model how to continue. `bash` keeps the *last* 2000 lines / 50KB, because
+the end of command output is what matters, and streams its output tail as
+updates every 250ms. `edit` requires an exact, unique match of `oldText`.
+
+**Consequences.** No image support in `read` (non-UTF-8 files are rejected),
+and no fuzzy matching in `edit`.
+
+---
+
+## D-002 addendum · Two `:httpc` streaming quirks, found by repeating tests
+
+Running the suite in a loop exposed two behaviours of `:httpc`'s async
+streaming mode, both confirmed in OTP's source:
+
+1. Body bytes that arrive in the same TCP read as the response headers are
+   not delivered until the next packet (`httpc_handler:handle_http_body/2`
+   stores the decoder continuation without streaming what it already
+   decoded). Against the real API this can delay the first event by one
+   packet gap, which is harmless for token streams. The test server sends
+   headers separately so abort tests are deterministic.
+2. An empty `{:stream, ""}` part may precede `:stream_end`. The provider
+   drains every message for the request, of any shape, before ending the
+   stream, so nothing is left in the consumer's mailbox.
