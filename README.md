@@ -1,7 +1,8 @@
 # pie
 
 A minimal rewrite of [Pi](https://github.com/badlogic/pi-mono), the coding
-agent, in Elixir, with OTP doing the heavy lifting. Zero dependencies.
+agent, in Elixir, with OTP doing the heavy lifting and a few well-chosen
+libraries (Req, NimbleOptions, `:telemetry`) doing the chores.
 
 > If I were building a coding agent from scratch, I would follow the same
 > order: start with a typed model stream, implement the smallest correct tool
@@ -22,6 +23,7 @@ decision along the way is recorded in **[DECISIONS.md](DECISIONS.md)**.
 Requires Elixir ≥ 1.18 (for the built-in `JSON` module) on OTP ≥ 25.
 
 ```sh
+mix deps.get
 mix escript.build                         # produces ./pie (needs Erlang at runtime)
 
 export ANTHROPIC_API_KEY=sk-...
@@ -65,7 +67,7 @@ skills from `.pie/skills/*/SKILL.md`, extensions from `.pie/extensions/*.exs`.
 
 | Agent concern | OTP feature | Where |
 |---|---|---|
-| Streaming a model reply | `Stream.resource/3` over `:httpc` async messages; halting cancels the request | `Pie.AI.Providers.Anthropic` |
+| Streaming a model reply | `Stream.resource/3` over Req's `into: :self` messages; halting cancels the request | `Pie.AI.Providers.Anthropic` |
 | Abort signal | a reference; aborting = sending `{:abort, ref}` to the consumer | `Pie.AI`, `Pie.Agent.Scheduler` |
 | One conversation's state | a `GenServer`: one mailbox serializes prompts, events and queries | `Pie.Agent` |
 | Running a turn | a `Task` linked to its agent; the agent traps exits | `Pie.Agent` |
@@ -75,6 +77,7 @@ skills from `.pie/skills/*/SKILL.md`, extensions from `.pie/extensions/*.exs`.
 | Crash recovery | per-agent `:rest_for_one` tree: session → extensions → agent | `Pie.Agent.Supervisor` |
 | Durable log | one process owns one append-only file | `Pie.Session` |
 | Plugins | supervised extension processes + runtime code loading (`Code.require_file/1`) | `Pie.Extension` |
+| Metrics and tracing | `:telemetry` spans for runs, turns, tools and compactions | `Pie.Telemetry` |
 
 The supervision tree:
 
@@ -107,6 +110,7 @@ tools = Pie.Tools.coding(cwd)
   )
 
 Pie.subscribe(agent)                       # {:pie_event, agent, event} messages
+Pie.Telemetry.attach_default_logger()      # or attach your own :telemetry handlers
 :ok = Pie.prompt(agent, "Run the tests and fix what fails")
 {:ok, :queued} = Pie.steer(agent, "Only touch lib/")
 Pie.await(agent)
@@ -121,6 +125,18 @@ Pie.AI.stream(model, %Pie.AI.Context{messages: [Pie.AI.UserMessage.new("hi")]})
   _event -> :ok
 end)
 ```
+
+Options are validated by a NimbleOptions schema: a typo such as `tols:`
+raises immediately, and `h Pie.start_agent` lists every option with its
+default.
+
+## Libraries
+
+| Library | Why |
+|---|---|
+| [Req](https://hex.pm/packages/req) | HTTP streaming, pooling, proxies and retries of 429/5xx/529; `stream_opts: [req_options: ...]` passes anything through |
+| [NimbleOptions](https://hex.pm/packages/nimble_options) | validates and documents `Pie.start_agent/1` options |
+| [telemetry](https://hex.pm/packages/telemetry) | standard span events for existing metrics and tracing tooling |
 
 ## Extending
 
@@ -142,13 +158,13 @@ mix test --repeat-until-failure 200    # how the concurrency bugs were shaken ou
 ```
 
 The `Faux` provider scripts model replies (and can assert on the context it is
-shown); `test/support/sse_server.ex` is a real HTTP server, so the `:httpc`
+shown); `test/support/sse_server.ex` is a real HTTP server, so the HTTP
 streaming path, aborts included, is tested end to end, up to a CLI run that
 makes a real bash tool call.
 
 ## What is deliberately missing
 
 Compared with Pi: other providers (OpenAI, Google, …), images, OAuth logins,
-automatic retries, model switching mid-session, prompt templates, a full TUI,
+model switching mid-session, prompt templates, a full TUI,
 extension commands and UI widgets, split-turn compaction and branch
 summaries. Each omission is noted in the decision that caused it.

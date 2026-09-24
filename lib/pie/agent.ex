@@ -52,6 +52,7 @@ defmodule Pie.Agent do
     run: nil,
     stream_message: nil,
     pending_tools: MapSet.new(),
+    timers: %{},
     steering: [],
     follow_up: [],
     waiters: [],
@@ -172,7 +173,7 @@ defmodule Pie.Agent do
 
   def handle_call(:abort, _from, %{run: %{kind: :compaction} = run} = s) do
     Task.shutdown(run.task, :brutal_kill)
-    broadcast(s, {:compaction_end, {:error, :aborted}})
+    s = broadcast(s, {:compaction_end, {:error, :aborted}})
     {:reply, :ok, %{s | steering: [], follow_up: []} |> idle() |> drain()}
   end
 
@@ -205,9 +206,7 @@ defmodule Pie.Agent do
 
   @impl true
   def handle_info({:run_event, run_id, event}, %{run: %{id: run_id}} = s) do
-    s = apply_event(s, event)
-    broadcast(s, event)
-    {:noreply, s}
+    {:noreply, s |> apply_event(event) |> broadcast(event)}
   end
 
   def handle_info({:run_event, _stale_run, _event}, s), do: {:noreply, s}
@@ -218,9 +217,10 @@ defmodule Pie.Agent do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{run: %{task: %{ref: ref}} = run} = s) do
-    if run.kind == :compaction,
-      do: broadcast(s, {:compaction_end, {:error, reason}}),
-      else: broadcast(s, {:run_crashed, reason})
+    s =
+      if run.kind == :compaction,
+        do: broadcast(s, {:compaction_end, {:error, reason}}),
+        else: broadcast(s, {:run_crashed, reason})
 
     {:noreply, s |> idle() |> Map.put(:error, Exception.format_exit(reason)) |> drain()}
   end
@@ -269,19 +269,20 @@ defmodule Pie.Agent do
 
   defp completed(:compaction, {:ok, compaction}, s) do
     Pie.Session.append_compaction(s.session, compaction)
-    s = %{s | messages: Pie.Session.context(s.session)}
-    broadcast(s, {:compaction_end, {:ok, compaction}})
-    s |> idle() |> drain()
+
+    %{s | messages: Pie.Session.context(s.session)}
+    |> broadcast({:compaction_end, {:ok, compaction}})
+    |> idle()
+    |> drain()
   end
 
   defp completed(:compaction, noop_or_error, s) do
-    broadcast(s, {:compaction_end, noop_or_error})
-    s |> idle() |> drain()
+    s |> broadcast({:compaction_end, noop_or_error}) |> idle() |> drain()
   end
 
   # Compaction is an LLM call: it runs in a task so the agent stays responsive.
   defp start_compaction(s, reason, instructions) do
-    broadcast(s, {:compaction_start, reason})
+    s = broadcast(s, {:compaction_start, reason})
     path = Pie.Session.path(s.session)
     %{model: model, compaction: settings, stream_opts: opts} = s
 
@@ -322,9 +323,12 @@ defmodule Pie.Agent do
 
   defp apply_event(s, _event), do: s
 
+  # Every event goes to subscribers and to :telemetry (see Pie.Telemetry).
   defp broadcast(s, event) do
     Registry.dispatch(Pie.PubSub, {:events, s.id}, fn subscribers ->
       for {pid, _} <- subscribers, do: send(pid, {:pie_event, s.id, event})
     end)
+
+    %{s | timers: Pie.Telemetry.handle(s.timers, s.id, event)}
   end
 end

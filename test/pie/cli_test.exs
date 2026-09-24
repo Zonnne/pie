@@ -38,7 +38,12 @@ defmodule Pie.CLITest do
     assert output =~ "unknown command /nope"
   end
 
-  test "--continue resumes the latest session for this directory" do
+  @tag :tmp_dir
+  test "--continue resumes the latest session for this directory", %{tmp_dir: dir} do
+    home = System.get_env("PIE_HOME")
+    System.put_env("PIE_HOME", dir)
+    on_exit(fn -> System.put_env("PIE_HOME", home) end)
+
     {0, _} = run(~w(--provider faux -p one))
     path = Pie.Session.latest(File.cwd!())
     {0, _} = run(~w(--provider faux -c -p two))

@@ -100,7 +100,8 @@ defmodule Pie.Session do
     |> dir()
     |> Path.join("*.jsonl")
     |> Path.wildcard()
-    |> Enum.max_by(&File.stat!(&1, time: :posix).mtime, fn -> nil end)
+    # mtime has one-second resolution; the timestamped name breaks ties.
+    |> Enum.max_by(&{File.stat!(&1, time: :posix).mtime, Path.basename(&1)}, fn -> nil end)
   end
 
   ## Server

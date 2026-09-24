@@ -581,3 +581,27 @@ Nested compaction settings are part of the schema.
 **Consequences.** Errors name the bad option at the call site, and the docs
 can't drift from the code. Internals (`Pie.Agent`) still tolerate missing
 keys, because the schema is the public contract, not an internal one.
+
+---
+
+## D-028 · Lifecycle events are also `:telemetry` spans
+
+**Context.** The pub/sub events (D-014) are great for UIs, but metrics,
+logging and tracing tools in the Elixir ecosystem (Telemetry.Metrics,
+OpenTelemetry, LiveDashboard) all speak `:telemetry`.
+
+**Decision.** Whenever the agent broadcasts an event, `Pie.Telemetry.handle/3`
+also emits the matching span event: `[:pie, :run | :turn | :tool |
+:compaction, :start | :stop]`, plus `[:pie, :run, :exception]` for a crashed
+run. `stop` events carry `:duration`; turn stops carry token counts; tool
+stops carry `:is_error`. Span start times live in the agent's state (a
+restarted agent starts fresh). `Pie.Telemetry.attach_default_logger/1` logs
+every span, and the CLI turns it on with `PIE_DEBUG=1`.
+
+**Consequences.** Observability now comes in two forms from one source:
+ordered messages for building interfaces, and spans for measuring. High-rate
+streaming deltas (`message_update`) are deliberately not telemetry events.
+
+Found while repeating the suite for this change: `Pie.Session.latest/1` could
+resume the wrong session when two were written within the same second
+(file mtime resolution). Ties now break on the timestamped file name.

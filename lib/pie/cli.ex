@@ -65,7 +65,12 @@ defmodule Pie.CLI do
 
   @doc "Escript entry point."
   def main(argv) do
-    Logger.configure(level: if(System.get_env("PIE_DEBUG"), do: :debug, else: :critical))
+    if System.get_env("PIE_DEBUG") do
+      Logger.configure(level: :debug)
+      Pie.Telemetry.attach_default_logger()
+    else
+      Logger.configure(level: :critical)
+    end
 
     status =
       try do
