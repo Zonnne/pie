@@ -11,27 +11,37 @@ defmodule Pie do
   See the README for the layers and DECISIONS.md for why they look this way.
   """
 
-  @doc "Starts a supervised agent and returns its id."
+  @doc """
+  Starts a supervised agent (with its session) and returns its id.
+
+  Options: `:model` (required), `:tools`, `:system_prompt`, `:session_path`
+  (a JSONL file, created lazily or resumed if it exists; `nil` keeps the
+  session in memory), `:cwd`, `:stream_opts`, `:max_concurrency`,
+  `:transform_context`, `:id`.
+  """
   @spec start_agent(keyword()) :: {:ok, String.t()} | {:error, term()}
   def start_agent(opts) do
     id = Keyword.get_lazy(opts, :id, &new_id/0)
 
     case DynamicSupervisor.start_child(
            Pie.AgentSupervisor,
-           {Pie.Agent, Keyword.put(opts, :id, id)}
+           {Pie.Agent.Supervisor, Keyword.put(opts, :id, id)}
          ) do
       {:ok, _pid} -> {:ok, id}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  @doc "Stops an agent (and anything it is running)."
+  @doc "Stops an agent, its session and anything it is running."
   def stop_agent(id) do
-    case GenServer.whereis(Pie.Agent.via(id)) do
+    case GenServer.whereis(Pie.Agent.Supervisor.via(id)) do
       nil -> :ok
       pid -> DynamicSupervisor.terminate_child(Pie.AgentSupervisor, pid)
     end
   end
+
+  @doc "The agent's session process (see `Pie.Session`)."
+  def session(id), do: Pie.Session.via(id)
 
   defdelegate prompt(agent, input), to: Pie.Agent
   defdelegate steer(agent, input), to: Pie.Agent

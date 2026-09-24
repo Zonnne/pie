@@ -1,0 +1,4 @@
+{"cwd":"/work","id":"ce6cd8b6-a888-3232-9ea0-c5d45d7030c5","timestamp":"2026-09-24T04:32:57.846557Z","type":"session","version":1}
+{"id":"79885a3d","message":{"content":[{"text":"hi","type":"text"}],"role":"user","timestamp":1790224377845},"parentId":null,"timestamp":"2026-09-24T04:32:57.846056Z","type":"message"}
+{"id":"f99f33e5","message":{"content":[{"text":"reading","type":"text"},{"arguments":{"path":"x"},"id":"t1","name":"read","type":"toolCall"}],"errorMessage":null,"model":"m","provider":"faux","role":"assistant","stopReason":"toolUse","timestamp":1,"usage":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0}},"parentId":"79885a3d","timestamp":"2026-09-24T04:32:57.847040Z","type":"message"}
+{"id":"030bab91","message":{"content":[{"text":"data","type":"text"}],"details":null,"isError":false,"role":"toolResult","timestamp":2,"toolCallId":"t1","toolName":"read"},"parentId":"f99f33e5","timestamp":"2026-09-24T04:32:57.847278Z","type":"message"}

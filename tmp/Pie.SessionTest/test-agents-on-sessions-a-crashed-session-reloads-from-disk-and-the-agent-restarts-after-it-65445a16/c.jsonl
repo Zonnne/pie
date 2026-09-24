@@ -1,0 +1,5 @@
+{"cwd":"/work","id":"e7d0a5cd-b6a6-2456-9964-eca653c21e04","timestamp":"2026-09-24T04:32:57.877989Z","type":"session","version":1}
+{"id":"f9117792","message":{"content":[{"text":"first","type":"text"}],"role":"user","timestamp":1790224377877},"parentId":null,"timestamp":"2026-09-24T04:32:57.877720Z","type":"message"}
+{"id":"90c68f2e","message":{"content":[{"text":"one","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224377877,"usage":{"cacheRead":0,"cacheWrite":0,"input":7,"output":3}},"parentId":"f9117792","timestamp":"2026-09-24T04:32:57.878187Z","type":"message"}
+{"id":"281f9e05","message":{"content":[{"text":"second","type":"text"}],"role":"user","timestamp":1790224377888},"parentId":"90c68f2e","timestamp":"2026-09-24T04:32:57.888819Z","type":"message"}
+{"id":"b68095c5","message":{"content":[{"text":"two","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224377888,"usage":{"cacheRead":0,"cacheWrite":0,"input":21,"output":3}},"parentId":"281f9e05","timestamp":"2026-09-24T04:32:57.890238Z","type":"message"}

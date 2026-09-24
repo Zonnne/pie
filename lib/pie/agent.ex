@@ -18,6 +18,11 @@ defmodule Pie.Agent do
   The loop task is linked to the agent (which traps exits): if the agent
   dies, the run dies with it; if the run crashes, the agent survives, reports
   `{:run_crashed, reason}` and goes idle.
+
+  Every agent has a `Pie.Session` (layer 4). Its messages are the session's
+  context projection, loaded at start, and each `message_end` is appended to
+  the session *before* it is broadcast, so a subscriber never sees a message
+  that could be lost. Restarting an agent re-hydrates it from the log.
   """
   use GenServer
 
@@ -27,6 +32,7 @@ defmodule Pie.Agent do
   defstruct [
     :id,
     :model,
+    :session,
     system_prompt: nil,
     tools: [],
     messages: [],
@@ -108,12 +114,15 @@ defmodule Pie.Agent do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    session = Keyword.fetch!(opts, :session)
+
     state = %__MODULE__{
       id: Keyword.fetch!(opts, :id),
       model: Keyword.fetch!(opts, :model),
+      session: session,
       system_prompt: Keyword.get(opts, :system_prompt),
       tools: Keyword.get(opts, :tools, []),
-      messages: Keyword.get(opts, :messages, []),
+      messages: Pie.Session.context(session),
       stream_opts: Keyword.get(opts, :stream_opts, []),
       max_concurrency: Keyword.get(opts, :max_concurrency, 4),
       transform_context: Keyword.get(opts, :transform_context, &Function.identity/1)
@@ -235,8 +244,10 @@ defmodule Pie.Agent do
 
   defp apply_event(s, {:message_update, event}), do: %{s | stream_message: Pie.AI.partial(event)}
 
-  defp apply_event(s, {:message_end, message}),
-    do: %{s | messages: s.messages ++ [message], stream_message: nil}
+  defp apply_event(s, {:message_end, message}) do
+    Pie.Session.append_message(s.session, message)
+    %{s | messages: s.messages ++ [message], stream_message: nil}
+  end
 
   defp apply_event(s, {:tool_execution_start, call}),
     do: update_in(s.pending_tools, &MapSet.put(&1, call.id))

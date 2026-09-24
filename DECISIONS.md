@@ -328,3 +328,62 @@ and one crashing in a loop must not take down the rest.
 crash, and it takes no bookkeeping, only links. A crash in projection or
 provider code costs one run, not the conversation (tested with a
 `transform_context` that raises).
+
+---
+
+## D-017 · Sessions are append-only JSONL trees, owned by one process
+
+**Context.** Pi stores sessions as JSON lines whose entries carry `id` and
+`parentId`, so a session is a tree: you can go back to an earlier point and
+branch without losing anything. The format is simple enough to grep and
+robust to crashes.
+
+**Decision.** `Pie.Session` is a GenServer that owns one file. Every entry
+gets an 8-hex id, its parent (the current leaf) and a timestamp, and is
+appended as one line. The file is created lazily on the first append (so a
+launched-and-quit session leaves nothing behind) and starts with a header
+line (`type: "session"`, version, id, cwd). On load, undecodable lines are
+skipped, so a torn final write loses one entry, not the session. `branch/2`
+moves the leaf; the next append forks there. `path: nil` gives an in-memory
+session with identical behaviour.
+
+**Consequences.** One mailbox serializes all writes, so there's no locking.
+Writes are not `fsync`ed (neither are Pi's); a machine crash can lose the
+tail. A leaf move that is never followed by an append is not persisted: on
+reload the leaf is the last entry written.
+
+---
+
+## D-018 · The context is a projection of the session; every agent has one
+
+**Context.** "Persist sessions independently from context": what is stored
+and what the model sees are different things. History is for humans,
+auditing and branching. Context is whatever currently fits and matters.
+
+**Decision.** `Pie.Session.Context.messages/1` projects the current branch
+(root → leaf) into messages, ignoring entry types it doesn't know. The agent's
+`messages` are only a cache of that projection: loaded at start, extended on
+each `message_end`, which is appended to the session *before* the event is
+broadcast. Every agent gets a session; `Pie.start_agent/1` makes an
+in-memory one unless `session_path` is given.
+
+**Consequences.** Branching, compaction (layer 5) and future entry types
+change the projection, never the log. The agent can be killed at any moment
+and rebuilt from the log. One invariant (agent state = projection of
+session) replaces the "with or without persistence" code paths.
+
+---
+
+## D-019 · One `rest_for_one` tree per agent: Session, then Agent
+
+**Decision.** `Pie.Agent.Supervisor` starts the session first and the agent
+second, with `:rest_for_one`. If the agent crashes, only the agent restarts
+and re-hydrates from the session. If the session crashes, the agent restarts
+after it and re-reads what the session re-loaded from disk. The tree, the
+session and the agent are all registered by agent id, so callers never hold
+stale pids. `Pie.stop_agent/1` terminates the whole tree.
+
+**Consequences.** Crash recovery needs no custom code; it is the
+supervisor's restart order plus D-018. Tests kill the agent and the session
+mid-conversation and continue talking. An in-memory session that crashes
+loses its history, which is the price of `path: nil`.

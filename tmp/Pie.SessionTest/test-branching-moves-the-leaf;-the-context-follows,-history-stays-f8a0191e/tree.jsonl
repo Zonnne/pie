@@ -1,0 +1,4 @@
+{"cwd":"/work","id":"d09d377b-b886-3136-e1f9-d15bf5580f10","timestamp":"2026-09-24T04:32:57.844240Z","type":"session","version":1}
+{"id":"f3012ec6","message":{"content":[{"text":"a","type":"text"}],"role":"user","timestamp":1790224377844},"parentId":null,"timestamp":"2026-09-24T04:32:57.844085Z","type":"message"}
+{"id":"af7af446","message":{"content":[{"text":"b","type":"text"}],"role":"user","timestamp":1790224377844},"parentId":"f3012ec6","timestamp":"2026-09-24T04:32:57.844449Z","type":"message"}
+{"id":"68d28d55","message":{"content":[{"text":"c","type":"text"}],"role":"user","timestamp":1790224377844},"parentId":"f3012ec6","timestamp":"2026-09-24T04:32:57.844490Z","type":"message"}

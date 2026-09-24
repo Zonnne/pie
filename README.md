@@ -22,3 +22,4 @@ pie is built in exactly that order, one layer per commit (see
 | 1 | Typed model stream | `Pie.AI`, `Pie.AI.Accumulator`, `Pie.AI.Providers.*` |
 | 2 | Smallest correct tool loop | `Pie.Agent.Loop`, `Pie.Agent.Scheduler`, `Pie.Tool`, `Pie.Tools.*` |
 | 3 | Observable lifecycle | `Pie.Agent`, `Pie.Agent.Event`, `Pie.PubSub` |
+| 4 | Sessions independent from context | `Pie.Session`, `Pie.Session.Context`, `Pie.Agent.Supervisor` |
