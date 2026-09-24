@@ -42,6 +42,20 @@ defmodule Pie.Session do
   def append_message(session, message),
     do: append(session, %{"type" => "message", "message" => Codec.encode(message)})
 
+  @doc "Records a compaction (see `Pie.Compaction`); the history before it stays in the log."
+  def append_compaction(session, %{
+        summary: summary,
+        first_kept_id: first_kept,
+        tokens_before: tokens
+      }) do
+    append(session, %{
+      "type" => "compaction",
+      "summary" => summary,
+      "firstKeptEntryId" => first_kept,
+      "tokensBefore" => tokens
+    })
+  end
+
   @doc "Moves the leaf to an earlier entry (`nil`: before the first); the next append forks there."
   def branch(session, entry_id), do: GenServer.call(session, {:branch, entry_id})
 

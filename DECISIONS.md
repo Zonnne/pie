@@ -436,3 +436,39 @@ and re-hydrates. Pi's other extension points (custom commands, UI widgets,
 context rewriting) are omitted. An extension that calls back into its agent
 while the agent is initializing can stall the agent's start for up to the
 5s gate timeout.
+
+---
+
+## D-022 · Compaction appends a summary entry; the projection does the rest
+
+**Context.** Long sessions outgrow the context window. Pi compacts by having
+the model summarize older messages and recording a `compaction` entry
+(summary + first kept entry id) in the session. The old messages stay in the
+file.
+
+**Decision.** Same model, three small pieces:
+
+* `Pie.Compaction.run/5` plans a cut that keeps about `keep_recent_tokens`
+  of recent messages (default 20k), moved back so it never lands on a tool
+  result (a call and its result stay together). It serializes the older
+  messages *as text* (so the summarizer reads the conversation rather than
+  continuing it), asks the same model for a structured summary (Goal,
+  Constraints, Progress, Key decisions, Next steps, Critical context), and
+  folds in the previous summary if there is one.
+* The session appends `{"type": "compaction", "summary", "firstKeptEntryId",
+  "tokensBefore"}`.
+* `Pie.Session.Context` projects the latest compaction as one user message
+  (`<summary>…</summary>`) followed by the kept messages.
+
+The agent runs compaction in its own task (status `:compacting`), after any
+run whose context exceeds `context_window - reserve_tokens` (default 16k
+reserve), or on `compact/2`. Context size is the usage reported with the
+last successful reply plus a 4-chars-per-token estimate for anything after
+it. The check runs only after a run, never right after a compaction, so a
+summary that is still too large cannot trigger a compaction loop.
+
+**Consequences.** Compaction is reversible: branch from before the entry.
+Prompts are refused while compacting; queued messages wait for it. Pi's
+refinements are left out: splitting a turn at the cut, summarizing
+abandoned branches on navigation, and compacting then retrying when the
+provider reports a context overflow.

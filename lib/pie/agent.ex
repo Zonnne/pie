@@ -22,6 +22,11 @@ defmodule Pie.Agent do
   Tools and the system prompt are extended at start by the agent's
   extensions (`Pie.Extension`), which also gate every tool call.
 
+  After each run, if the context is near the model's window, the agent
+  compacts it (`Pie.Compaction`) in a task of its own; `compact/2` does the
+  same on request. Prompts are refused while compacting; queued messages
+  wait for it to finish.
+
   Every agent has a `Pie.Session` (layer 4). Its messages are the session's
   context projection, loaded at start, and each `message_end` is appended to
   the session *before* it is broadcast, so a subscriber never sees a message
@@ -42,6 +47,7 @@ defmodule Pie.Agent do
     stream_opts: [],
     max_concurrency: 4,
     transform_context: &Function.identity/1,
+    compaction: Pie.Compaction.defaults(),
     status: :idle,
     run: nil,
     stream_message: nil,
@@ -82,6 +88,11 @@ defmodule Pie.Agent do
 
   @doc "Aborts the current run (the partial reply is kept) and clears queued messages."
   def abort(agent), do: GenServer.call(server(agent), :abort)
+
+  @doc "Summarizes older history to free context. Only while idle."
+  @spec compact(agent(), String.t() | nil) :: :ok | {:error, :running | :compacting}
+  def compact(agent, instructions \\ nil),
+    do: GenServer.call(server(agent), {:compact, instructions})
 
   @doc "Blocks until the agent is idle."
   def await(agent, timeout \\ :infinity), do: GenServer.call(server(agent), :await, timeout)
@@ -129,7 +140,9 @@ defmodule Pie.Agent do
       messages: Pie.Session.context(session),
       stream_opts: Keyword.get(opts, :stream_opts, []),
       max_concurrency: Keyword.get(opts, :max_concurrency, 4),
-      transform_context: Keyword.get(opts, :transform_context, &Function.identity/1)
+      transform_context: Keyword.get(opts, :transform_context, &Function.identity/1),
+      compaction:
+        Map.merge(Pie.Compaction.defaults(), Map.new(Keyword.get(opts, :compaction, [])))
     }
 
     {:ok, state}
@@ -157,7 +170,18 @@ defmodule Pie.Agent do
     {:reply, :ok, %{s | steering: [], follow_up: []}}
   end
 
+  def handle_call(:abort, _from, %{run: %{kind: :compaction} = run} = s) do
+    Task.shutdown(run.task, :brutal_kill)
+    broadcast(s, {:compaction_end, {:error, :aborted}})
+    {:reply, :ok, %{s | steering: [], follow_up: []} |> idle() |> drain()}
+  end
+
   def handle_call(:abort, _from, s), do: {:reply, :ok, s}
+
+  def handle_call({:compact, instructions}, _from, %{status: :idle} = s),
+    do: {:reply, :ok, start_compaction(s, :manual, instructions)}
+
+  def handle_call({:compact, _}, _from, s), do: {:reply, {:error, s.status}, s}
 
   def handle_call(:await, _from, %{status: :idle} = s), do: {:reply, :ok, s}
   def handle_call(:await, from, s), do: {:noreply, %{s | waiters: [from | s.waiters]}}
@@ -193,8 +217,11 @@ defmodule Pie.Agent do
     {:noreply, completed(run.kind, result, s)}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{run: %{task: %{ref: ref}}} = s) do
-    broadcast(s, {:run_crashed, reason})
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{run: %{task: %{ref: ref}} = run} = s) do
+    if run.kind == :compaction,
+      do: broadcast(s, {:compaction_end, {:error, reason}}),
+      else: broadcast(s, {:run_crashed, reason})
+
     {:noreply, s |> idle() |> Map.put(:error, Exception.format_exit(reason)) |> drain()}
   end
 
@@ -232,7 +259,39 @@ defmodule Pie.Agent do
     %{s | status: :running, run: %{id: run_id, kind: :loop, task: task}, error: nil}
   end
 
-  defp completed(:loop, _new_messages, s), do: s |> idle() |> drain()
+  defp completed(:loop, _new_messages, s) do
+    s = idle(s)
+
+    if Pie.Compaction.due?(s.messages, s.model, s.compaction),
+      do: start_compaction(s, :threshold, nil),
+      else: drain(s)
+  end
+
+  defp completed(:compaction, {:ok, compaction}, s) do
+    Pie.Session.append_compaction(s.session, compaction)
+    s = %{s | messages: Pie.Session.context(s.session)}
+    broadcast(s, {:compaction_end, {:ok, compaction}})
+    s |> idle() |> drain()
+  end
+
+  defp completed(:compaction, noop_or_error, s) do
+    broadcast(s, {:compaction_end, noop_or_error})
+    s |> idle() |> drain()
+  end
+
+  # Compaction is an LLM call: it runs in a task so the agent stays responsive.
+  defp start_compaction(s, reason, instructions) do
+    broadcast(s, {:compaction_start, reason})
+    path = Pie.Session.path(s.session)
+    %{model: model, compaction: settings, stream_opts: opts} = s
+
+    task =
+      Task.Supervisor.async(Pie.TaskSupervisor, fn ->
+        Pie.Compaction.run(path, model, settings, opts, instructions)
+      end)
+
+    %{s | status: :compacting, run: %{id: make_ref(), kind: :compaction, task: task}}
+  end
 
   defp idle(s),
     do: %{s | status: :idle, run: nil, stream_message: nil, pending_tools: MapSet.new()}

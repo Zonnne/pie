@@ -117,7 +117,8 @@ defmodule Pie.ExtensionTest do
 
     assert GenServer.whereis(Pie.Agent.via(id)) == agent
     assert Enum.map(Pie.snapshot(id).messages, &Message.text/1) == ["go", "one", "again", "two"]
-    assert_received {:observed, :agent_start}
+    # Observers run asynchronously; give the restarted one time to catch up.
+    assert_receive {:observed, :agent_start}
   end
 
   @tag :tmp_dir

@@ -17,7 +17,8 @@ defmodule Pie do
   Options: `:model` (required), `:tools`, `:system_prompt`, `:session_path`
   (a JSONL file, created lazily or resumed if it exists; `nil` keeps the
   session in memory), `:cwd`, `:stream_opts`, `:max_concurrency`,
-  `:transform_context`, `:extensions` (modules or `{module, opts}`), `:id`.
+  `:transform_context`, `:extensions` (modules or `{module, opts}`),
+  `:compaction` (`enabled`, `reserve_tokens`, `keep_recent_tokens`), `:id`.
   """
   @spec start_agent(keyword()) :: {:ok, String.t()} | {:error, term()}
   def start_agent(opts) do
@@ -47,6 +48,7 @@ defmodule Pie do
   defdelegate steer(agent, input), to: Pie.Agent
   defdelegate follow_up(agent, input), to: Pie.Agent
   defdelegate abort(agent), to: Pie.Agent
+  defdelegate compact(agent, instructions \\ nil), to: Pie.Agent
   defdelegate await(agent, timeout \\ :infinity), to: Pie.Agent
   defdelegate snapshot(agent), to: Pie.Agent
   defdelegate subscribe(agent), to: Pie.Agent
