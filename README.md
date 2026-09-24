@@ -26,3 +26,4 @@ pie is built in exactly that order, one layer per commit (see
 | 5a | Prompts | `Pie.Prompt` |
 | 5b | Extensions | `Pie.Extension`, `Pie.Extension.Server` |
 | 5c | Compaction | `Pie.Compaction` |
+| 5d | Skills | `Pie.Skills` |

@@ -18,8 +18,9 @@ defmodule Pie.Prompt do
   }
 
   @doc """
-  Options: `:cwd` (required), `:tools`, `:context_files` (list of
-  `{path, content}`; discovered when omitted), `:date`.
+  Options: `:cwd` (required), `:tools`, `:skills` (see `Pie.Skills`),
+  `:context_files` (list of `{path, content}`; discovered when omitted),
+  `:date`.
   """
   @spec build(keyword()) :: String.t()
   def build(opts) do
@@ -33,6 +34,7 @@ defmodule Pie.Prompt do
     [
       intro(tools),
       project_context(files),
+      Pie.Skills.prompt_section(Keyword.get(opts, :skills, [])),
       "Current date: #{date}\nCurrent working directory: #{cwd}"
     ]
     |> Enum.reject(&(&1 == ""))

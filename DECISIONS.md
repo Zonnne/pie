@@ -472,3 +472,21 @@ Prompts are refused while compacting; queued messages wait for it. Pi's
 refinements are left out: splitting a turn at the cut, summarizing
 abandoned branches on navigation, and compacting then retrying when the
 provider reports a context overflow.
+
+---
+
+## D-023 · Skills: progressive disclosure through the read tool
+
+**Context.** Pi supports Agent Skills: directories with a `SKILL.md`
+(frontmatter `name` and `description`, then instructions). Only the
+description is always in context; the body is read when needed.
+
+**Decision.** `Pie.Skills.discover/1` scans `.pie/skills/*/SKILL.md` and
+`$PIE_HOME/skills/*/SKILL.md` (project first; the first skill with a given
+name wins), parses the frontmatter with a tiny `key: value` reader, and
+`Pie.Prompt` lists each skill as name, description and location. The model
+loads a skill with the ordinary `read` tool. There is no skill runtime at all.
+
+**Consequences.** Skills cost two lines of context until they are used. The
+frontmatter parser handles single-line values only; multi-line YAML
+descriptions are not supported.
