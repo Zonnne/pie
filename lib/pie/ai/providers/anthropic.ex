@@ -1,16 +1,20 @@
 defmodule Pie.AI.Providers.Anthropic do
   @moduledoc """
-  Anthropic Messages API over server-sent events.
+  Anthropic Messages API over server-sent events, via `Req`.
 
-  Uses only OTP: `:httpc` for HTTP (in async streaming mode, so body chunks
-  arrive as messages in the consuming process), `:ssl` and
-  `:public_key.cacerts_get/0` for verified TLS. The stream is an Elixir
-  `Stream.resource/3`, so the HTTP request lives exactly as long as someone
-  is consuming it: halting the stream early cancels the request.
+  The request uses `into: :self`, so body chunks arrive as messages in the
+  consuming process and are decoded with `Req.parse_message/2`. The stream is
+  an Elixir `Stream.resource/3`: the HTTP response lives exactly as long as
+  someone is consuming it, and halting the stream early cancels it.
+
+  Req brings the ergonomics: connection pooling (Finch), proxies, retries of
+  overloaded/rate-limited requests (429, 5xx and 529, before any body is
+  streamed) and a single `:req_options` escape hatch for anything else.
 
   Options: `:api_key` (default `ANTHROPIC_API_KEY`), `:max_tokens`,
-  `:thinking_budget`, `:signal`. The base URL comes from the model, then
-  `ANTHROPIC_BASE_URL`, then the public endpoint.
+  `:thinking_budget`, `:signal`, `:req_options` (merged into the request).
+  The base URL comes from the model, then `ANTHROPIC_BASE_URL`, then the
+  public endpoint.
   """
   @behaviour Pie.AI.Provider
 
@@ -31,22 +35,32 @@ defmodule Pie.AI.Providers.Anthropic do
   defp open(model, context, opts) do
     state = %{
       acc: Accumulator.new(model),
-      request: nil,
+      response: nil,
       buffer: "",
       signal: opts[:signal] || make_ref(),
       phase: :start,
       error: nil
     }
 
-    case Keyword.get_lazy(opts, :api_key, fn -> System.get_env("ANTHROPIC_API_KEY") end) do
-      key when key in [nil, ""] ->
-        %{state | error: "ANTHROPIC_API_KEY is not set"}
+    with {:ok, key} <- api_key(opts),
+         {:ok, %Req.Response{status: 200} = response} <- request(model, context, key, opts) do
+      %{state | response: response}
+    else
+      {:ok, %Req.Response{status: status} = response} ->
+        %{state | error: "HTTP #{status}: #{error_message(read_all(response))}"}
 
-      key ->
-        case request(model, context, key, opts) do
-          {:ok, id} -> %{state | request: id}
-          {:error, reason} -> %{state | error: "Request failed: #{inspect(reason)}"}
-        end
+      {:error, %{__exception__: true} = exception} ->
+        %{state | error: "Request failed: #{Exception.message(exception)}"}
+
+      {:error, message} ->
+        %{state | error: message}
+    end
+  end
+
+  defp api_key(opts) do
+    case Keyword.get_lazy(opts, :api_key, fn -> System.get_env("ANTHROPIC_API_KEY") end) do
+      key when key in [nil, ""] -> {:error, "ANTHROPIC_API_KEY is not set"}
+      key -> {:ok, key}
     end
   end
 
@@ -59,34 +73,37 @@ defmodule Pie.AI.Providers.Anthropic do
 
   defp next(%{phase: :halted} = s), do: {:halt, s}
 
-  # After message_stop the server closes the stream; wait briefly for that so
-  # no stray :httpc messages are left in the consumer's mailbox.
-  defp next(%{phase: :draining, request: id} = s) do
+  # After message_stop the server ends the body; read up to that so nothing
+  # is left behind in the consumer's mailbox.
+  defp next(%{phase: :draining, response: response} = s) do
+    ref = response.body.ref
+
     receive do
-      {:http, {^id, :stream_end, _}} -> {:halt, %{s | request: nil}}
-      {:http, {^id, {:error, _}}} -> {:halt, %{s | request: nil}}
-      {:http, {^id, :stream, _trailing_chunk}} -> {[], s}
+      {^ref, _} = message ->
+        case Req.parse_message(response, message) do
+          {:ok, chunks} -> if :done in chunks, do: {:halt, %{s | response: nil}}, else: {[], s}
+          _error -> {:halt, %{s | response: nil}}
+        end
     after
       5_000 -> {:halt, s}
     end
   end
 
-  defp next(%{phase: :streaming, request: id, signal: signal} = s) do
+  defp next(%{phase: :streaming, response: response, signal: signal} = s) do
+    ref = response.body.ref
+
     receive do
-      {:http, {^id, :stream_start, _headers}} ->
-        {[], s}
+      {^ref, _} = message ->
+        case Req.parse_message(response, message) do
+          {:ok, chunks} ->
+            consume(s, chunks)
 
-      {:http, {^id, :stream, chunk}} ->
-        consume(s, chunk)
+          {:error, reason} ->
+            fail(%{s | response: nil}, :error, "Stream error: #{format(reason)}")
 
-      {:http, {^id, :stream_end, _headers}} ->
-        fail(%{s | request: nil}, :error, "Stream ended before message_stop")
-
-      {:http, {^id, {{_, status, _}, _headers, body}}} ->
-        fail(%{s | request: nil}, :error, "HTTP #{status}: #{error_message(body)}")
-
-      {:http, {^id, {:error, reason}}} ->
-        fail(%{s | request: nil}, :error, "HTTP error: #{inspect(reason)}")
+          :unknown ->
+            {[], s}
+        end
 
       {:abort, ^signal} ->
         fail(s, :aborted, "Request aborted")
@@ -95,38 +112,39 @@ defmodule Pie.AI.Providers.Anthropic do
     end
   end
 
-  defp close(%{request: nil}), do: :ok
-  defp close(%{request: id}), do: cancel(id)
-
-  defp cancel(nil), do: :ok
-
-  defp cancel(id) do
-    :httpc.cancel_request(id)
-    flush(id)
-  end
-
-  defp flush(id) do
-    receive do
-      {:http, message} when elem(message, 0) == id -> flush(id)
-    after
-      0 -> :ok
-    end
-  end
+  defp close(%{response: nil}), do: :ok
+  defp close(%{response: response}), do: Req.cancel_async_response(response)
 
   defp fail(s, reason, message) do
-    cancel(s.request)
-    {[Accumulator.fail(s.acc, reason, message)], %{s | request: nil, phase: :halted}}
+    close(s)
+    {[Accumulator.fail(s.acc, reason, message)], %{s | response: nil, phase: :halted}}
   end
 
-  defp consume(s, chunk) do
-    {events, buffer} = SSE.parse(s.buffer <> chunk)
-    fold(Enum.flat_map(events, &to_deltas/1), %{s | buffer: buffer}, [])
+  defp read_all(%Req.Response{body: %Req.Response.Async{} = body}), do: Enum.join(body)
+  defp read_all(%Req.Response{body: body}) when is_binary(body), do: body
+
+  defp format(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp format(reason), do: inspect(reason)
+
+  defp consume(s, chunks) do
+    data = for {:data, bin} <- chunks, into: "", do: bin
+    {events, buffer} = SSE.parse(s.buffer <> data)
+    deltas = Enum.flat_map(events, &to_deltas/1)
+    # The body ending before message_stop is a failure, not a success.
+    deltas =
+      if :done in chunks,
+        do: deltas ++ [{:fail, "Stream ended before message_stop"}],
+        else: deltas
+
+    s = %{s | buffer: buffer}
+    if :done in chunks, do: fold(deltas, %{s | response: nil}, []), else: fold(deltas, s, [])
   end
 
   defp fold([], s, out), do: {Enum.reverse(out), s}
 
   defp fold([:finish | _], s, out) do
-    {Enum.reverse([Accumulator.finish(s.acc) | out]), %{s | phase: :draining}}
+    phase = if s.response, do: :draining, else: :halted
+    {Enum.reverse([Accumulator.finish(s.acc) | out]), %{s | phase: phase}}
   end
 
   defp fold([{:fail, message} | _], s, out) do
@@ -219,32 +237,33 @@ defmodule Pie.AI.Providers.Anthropic do
 
   defp request(model, context, key, opts) do
     base = model.base_url || System.get_env("ANTHROPIC_BASE_URL") || @default_base_url
-    url = String.to_charlist(String.trim_trailing(base, "/") <> "/v1/messages")
 
-    headers = [
-      {~c"x-api-key", String.to_charlist(key)},
-      {~c"anthropic-version", ~c"2023-06-01"},
-      {~c"accept", ~c"text/event-stream"}
-    ]
-
-    body = JSON.encode!(body(model, context, opts))
-    http_opts = [connect_timeout: 30_000, ssl: ssl_opts()]
-
-    :httpc.request(:post, {url, headers, ~c"application/json", body}, http_opts,
-      sync: false,
-      stream: :self,
-      body_format: :binary
-    )
-  end
-
-  defp ssl_opts do
     [
-      verify: :verify_peer,
-      cacerts: :public_key.cacerts_get(),
-      depth: 4,
-      customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
+      method: :post,
+      base_url: base,
+      url: "/v1/messages",
+      headers: [{"x-api-key", key}, {"anthropic-version", "2023-06-01"}],
+      json: body(model, context, opts),
+      into: :self,
+      receive_timeout: @idle_timeout,
+      retry: &retry?/2,
+      retry_log_level: false
     ]
+    |> Req.new()
+    |> Req.merge(Keyword.get(opts, :req_options, []))
+    |> Req.request()
   end
+
+  # Rate limits, server errors and Anthropic's 529 "overloaded"; plus network
+  # failures. Only reached before the body streams, so a retry never repeats
+  # output.
+  defp retry?(_request, %Req.Response{status: status}),
+    do: status in [408, 429, 500, 502, 503, 504, 529]
+
+  defp retry?(_request, %Req.TransportError{reason: reason}),
+    do: reason in [:timeout, :econnrefused, :closed]
+
+  defp retry?(_request, _other), do: false
 
   @doc false
   # Public for tests: the exact JSON body sent for a context.

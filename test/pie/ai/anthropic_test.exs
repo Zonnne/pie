@@ -134,6 +134,26 @@ defmodule Pie.AI.AnthropicTest do
              AI.complete(model, %Context{messages: [UserMessage.new("hi")]}, api_key: "bad")
   end
 
+  test "overloaded responses are retried before streaming starts" do
+    {:ok, attempts} = Agent.start_link(fn -> 0 end)
+
+    url =
+      SSEServer.start(fn _ ->
+        case Agent.get_and_update(attempts, &{&1, &1 + 1}) do
+          0 -> {529, [~s({"error":{"type":"overloaded_error","message":"Overloaded"}})]}
+          _ -> {200, events(tool_block())}
+        end
+      end)
+
+    model = Model.new(:anthropic, "m", base_url: url)
+    opts = [api_key: "k", req_options: [retry_delay: fn _ -> 10 end]]
+
+    assert %AssistantMessage{stop_reason: :tool_use} =
+             AI.complete(model, %Context{messages: [UserMessage.new("hi")]}, opts)
+
+    assert Agent.get(attempts, & &1) == 2
+  end
+
   test "a missing API key is an error event" do
     model = Model.new(:anthropic, "m", base_url: "http://127.0.0.1:1")
 

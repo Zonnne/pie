@@ -535,3 +535,32 @@ waiting for events instead of sleeping, and by asserting properties
 **Consequences.** The suite is deterministic under load, and the log above
 explains the less obvious lines of code (the drain loop, the runner
 process, the unlinking of finished tasks).
+
+---
+
+## D-026 · Dependencies are allowed; supersedes D-002
+
+**Context.** The zero-dependency rule (D-002) was a self-imposed constraint,
+and the user lifted it: optimise for ergonomics instead. The cost of D-002
+was visible in code: charlist URLs and headers for `:httpc`, two workarounds
+for its streaming quirks (D-002 addendum), hand-built TLS options, no proxy
+support, no retries.
+
+**Decision.** Use well-established libraries where they remove code or add
+real capability, and nowhere else:
+
+* **Req** (on Finch/Mint) for HTTP. The provider keeps its shape: it still
+  streams into the consumer's mailbox (`into: :self`, decoded with
+  `Req.parse_message/2`) inside `Stream.resource/3`, so abort-as-a-message
+  (D-005) and cancel-on-halt (D-003) are unchanged. Both `:httpc` workarounds
+  are gone. Rate limits, 5xx and Anthropic's 529 "overloaded" are retried
+  (before any body is streamed, so output is never duplicated), and
+  `:req_options` passes anything else through (proxies, custom Finch pools,
+  `Req.Test` plugs).
+* Elixir's built-in `JSON` stays for our own encoding; Req brings Jason for
+  its `json:` option, which is fine.
+
+**Consequences.** `mix deps.get` is now part of setup, and the escript
+bundles the dependencies. The hand-written TCP test server stays: it tests
+real chunked streaming and aborts over a socket, which a plug stub would not.
+The D-002 addendum describes the old HTTP client and is kept only as history.

@@ -53,11 +53,6 @@ defmodule Pie.Test.SSEServer do
       "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n"
     )
 
-    # :httpc does not stream body bytes that arrive in the same read as the
-    # headers until more data comes (httpc_handler:handle_http_body/2), so let
-    # the headers go out alone to keep timing-sensitive tests deterministic.
-    Process.sleep(20)
-
     Enum.each(parts, fn
       {:sleep, ms} ->
         Process.sleep(ms)
