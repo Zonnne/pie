@@ -11,17 +11,86 @@ defmodule Pie do
   See the README for the layers and DECISIONS.md for why they look this way.
   """
 
+  @agent_options NimbleOptions.new!(
+                   model: [
+                     type: {:struct, Pie.AI.Model},
+                     required: true,
+                     doc: "The model to talk to (`Pie.AI.Model.new/3`)."
+                   ],
+                   tools: [
+                     type: {:list, {:struct, Pie.Tool}},
+                     default: [],
+                     doc: "Tools the model may call, e.g. `Pie.Tools.coding(cwd)`."
+                   ],
+                   system_prompt: [
+                     type: :string,
+                     default: "",
+                     doc: "The system prompt, e.g. from `Pie.Prompt.build/1`."
+                   ],
+                   session_path: [
+                     type: {:or, [:string, nil]},
+                     default: nil,
+                     doc:
+                       "A JSONL session file, created lazily or resumed if it exists. `nil` keeps the session in memory."
+                   ],
+                   cwd: [
+                     type: :string,
+                     doc: "Recorded in the session header. Defaults to the current directory."
+                   ],
+                   stream_opts: [
+                     type: :keyword_list,
+                     default: [],
+                     doc:
+                       "Passed to the provider on every request (`:api_key`, `:max_tokens`, `:thinking_budget`, `:req_options`)."
+                   ],
+                   max_concurrency: [
+                     type: :pos_integer,
+                     default: 4,
+                     doc: "How many `parallel: true` tool calls may run at once."
+                   ],
+                   transform_context: [
+                     type: {:fun, 1},
+                     doc: "Projects the message history before each model call."
+                   ],
+                   extensions: [
+                     type: {:list, {:or, [:atom, {:tuple, [:atom, :keyword_list]}]}},
+                     default: [],
+                     doc: "`Pie.Extension` modules, or `{module, opts}` tuples."
+                   ],
+                   compaction: [
+                     type: :keyword_list,
+                     default: [],
+                     keys: [
+                       enabled: [type: :boolean, default: true, doc: "Compact automatically."],
+                       reserve_tokens: [
+                         type: :pos_integer,
+                         default: 16_384,
+                         doc:
+                           "Compact when the context comes within this many tokens of the window."
+                       ],
+                       keep_recent_tokens: [
+                         type: :non_neg_integer,
+                         default: 20_000,
+                         doc: "Roughly how much recent history to keep verbatim."
+                       ]
+                     ],
+                     doc: "See `Pie.Compaction`."
+                   ],
+                   id: [type: :string, doc: "The agent's id. Random when omitted."]
+                 )
+
   @doc """
   Starts a supervised agent (with its session) and returns its id.
 
-  Options: `:model` (required), `:tools`, `:system_prompt`, `:session_path`
-  (a JSONL file, created lazily or resumed if it exists; `nil` keeps the
-  session in memory), `:cwd`, `:stream_opts`, `:max_concurrency`,
-  `:transform_context`, `:extensions` (modules or `{module, opts}`),
-  `:compaction` (`enabled`, `reserve_tokens`, `keep_recent_tokens`), `:id`.
+  Raises `NimbleOptions.ValidationError` on unknown or ill-typed options.
+
+  ## Options
+
+  #{NimbleOptions.docs(@agent_options)}
   """
   @spec start_agent(keyword()) :: {:ok, String.t()} | {:error, term()}
   def start_agent(opts) do
+    opts = NimbleOptions.validate!(opts, @agent_options)
     id = Keyword.get_lazy(opts, :id, &new_id/0)
 
     case DynamicSupervisor.start_child(

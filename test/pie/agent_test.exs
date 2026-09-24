@@ -129,6 +129,21 @@ defmodule Pie.AgentTest do
     assert [_ | _] = collect_until(id, &match?({:agent_end, _}, &1))
   end
 
+  test "invalid options fail at start with a clear message" do
+    error =
+      assert_raise NimbleOptions.ValidationError, fn ->
+        Pie.start_agent(model: faux([]), tols: [])
+      end
+
+    assert Exception.message(error) =~ "unknown options [:tols]"
+
+    assert_raise NimbleOptions.ValidationError, ~r/max_concurrency/, fn ->
+      Pie.start_agent(model: faux([]), max_concurrency: 0)
+    end
+
+    assert_raise NimbleOptions.ValidationError, ~r/required :model/, fn -> Pie.start_agent([]) end
+  end
+
   test "events render as JSON" do
     id = start(model: faux([[{:text, "hi"}, {:tool_call, "missing", %{"a" => 1}}], "ok"]))
     :ok = Pie.prompt(id, "go")

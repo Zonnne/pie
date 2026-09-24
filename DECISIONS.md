@@ -564,3 +564,20 @@ real capability, and nowhere else:
 bundles the dependencies. The hand-written TCP test server stays: it tests
 real chunked streaming and aborts over a socket, which a plug stub would not.
 The D-002 addendum describes the old HTTP client and is kept only as history.
+
+---
+
+## D-027 · Agent options are a NimbleOptions schema
+
+**Context.** `Pie.start_agent/1` takes a dozen options. A typo (`tols:`) was
+silently ignored, and a wrong type failed later, deep inside the agent or
+the loop, far from the caller.
+
+**Decision.** One `NimbleOptions` schema validates the options at the
+boundary (`validate!`, raising `NimbleOptions.ValidationError`), fills
+defaults, and generates the option docs in `Pie.start_agent/1`'s `@doc`.
+Nested compaction settings are part of the schema.
+
+**Consequences.** Errors name the bad option at the call site, and the docs
+can't drift from the code. Internals (`Pie.Agent`) still tolerate missing
+keys, because the schema is the public contract, not an internal one.
