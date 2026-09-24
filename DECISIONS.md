@@ -256,3 +256,75 @@ streaming mode, both confirmed in OTP's source:
 2. An empty `{:stream, ""}` part may precede `:stream_end`. The provider
    drains every message for the request, of any shape, before ending the
    stream, so nothing is left in the consumer's mailbox.
+
+---
+
+## D-013 · The agent is a GenServer and the only source of truth
+
+**Context.** Pi's `Agent` class holds state (`messages`, `isStreaming`,
+`streamMessage`, `pendingToolCalls`) and re-emits loop events to listeners
+after updating that state.
+
+**Decision.** `Pie.Agent` is a GenServer that runs at most one loop at a time,
+in a task. The loop reports events as messages tagged with a run id. The
+agent applies each event to its state, then broadcasts it. A subscriber that
+receives `{:message_end, m}` can rely on `m` already being in the agent's
+state. Events whose run id is not the current run (an aborted or crashed
+run's leftovers) are dropped.
+
+**Consequences.** One mailbox serializes everything: prompts, queue changes,
+events, snapshots. There are no locks and no torn reads. The loop keeps a
+private copy of the history for the run (D-008), so the agent's copy and the
+loop's copy are reconciled by `message_end` events, not by sharing.
+
+---
+
+## D-014 · Pub/sub is a `Registry` with duplicate keys, keyed by agent id
+
+**Decision.** `Pie.PubSub` is a duplicate-key `Registry`. Subscribing
+registers the caller under `{:events, agent_id}`, and the agent broadcasts
+with `Registry.dispatch/3`. Agents are also named through a unique `Registry`
+(`{:agent, id}`), so callers address them by id.
+
+**Consequences.** A subscription belongs to the subscriber, not to the agent
+process, so it survives agent restarts (tested). Subscriptions are cleaned
+up automatically when subscribers die. Delivery is local to the node, which
+is all a CLI agent needs; `:pg` would be the drop-in for a cluster.
+
+---
+
+## D-015 · Steering and follow-up queues live in the agent; delivery is at turn boundaries
+
+**Context.** Pi lets users *steer* a running agent (a message delivered
+mid-run) and queue *follow-ups* (delivered when it would stop). Pi runs tools
+one at a time and skips the remaining ones when a steering message arrives.
+
+**Decision.** The agent owns both queues. The loop dequeues them with a
+synchronous call at turn boundaries. Steering is delivered after the
+current tool batch completes, which means we never kill a running tool to
+make room for a steering message. Follow-ups are delivered when a turn ends
+without tool calls. All queued messages are delivered together. A message
+queued after the loop's last check starts a new run as soon as the current
+one ends, so nothing is ever stranded. `abort/1` clears both queues.
+`steer/2` and `follow_up/2` on an idle agent simply start a run.
+
+**Consequences.** Steering is less immediate than Pi's when a batch contains
+a slow tool; in exchange, a tool's side effects are never cut short by a
+user message, only by an explicit abort.
+
+---
+
+## D-016 · Runs are linked to their agent; the agent traps exits
+
+**Decision.** The loop task is started with `Task.Supervisor.async/2`
+(linked + monitored) and the agent traps exits. If the agent dies, the linked
+run (and its linked tools, D-010) die too; if the run crashes, the agent gets
+a `:DOWN`, broadcasts `{:run_crashed, reason}`, records the error and returns
+to idle. `terminate/2` kills the run on orderly shutdown. The agents'
+`DynamicSupervisor` tolerates many restarts, because agents are independent
+and one crashing in a loop must not take down the rest.
+
+**Consequences.** There are no orphaned runs and no zombie tools after a
+crash, and it takes no bookkeeping, only links. A crash in projection or
+provider code costs one run, not the conversation (tested with a
+`transform_context` that raises).

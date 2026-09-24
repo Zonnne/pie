@@ -177,32 +177,29 @@ defmodule Pie.Agent.LoopTest do
 
     signal = make_ref()
     calls = [{:tool_call, "hang", %{}}, {:tool_call, "next", %{}}]
-
-    loop =
-      Task.async(fn ->
-        Loop.run([UserMessage.new("go")], [], config([calls], tools: tools, signal: signal))
-      end)
+    cfg = config([calls], tools: tools, signal: signal)
+    loop = Task.async(fn -> Loop.run([UserMessage.new("go")], [], cfg) end)
 
     assert_receive {:tool_pid, tool_pid}
-    ref = Process.monitor(tool_pid)
     send(loop.pid, {:abort, signal})
-    assert_receive {:DOWN, ^ref, :process, ^tool_pid, :killed}
 
-    new = Task.await(loop)
-    assert [_, _, %ToolResultMessage{} = hang, %ToolResultMessage{} = skipped] = new
-    assert Message.text(hang) == "Aborted"
-    assert Message.text(skipped) =~ "Skipped"
+    assert [_, _, %ToolResultMessage{} = hang, %ToolResultMessage{} = skipped] = Task.await(loop)
+
+    assert {Message.text(hang), Message.text(skipped)} ==
+             {"Aborted", "Skipped: the run was aborted"}
+
+    refute Process.alive?(tool_pid)
   end
 
   test "aborting mid-stream ends the run with the partial reply" do
     signal = make_ref()
-    cfg = config(["one two three four five six"], signal: signal, model_options: %{delay: 30})
+    cfg = config(["one two three four five six"], signal: signal, model_options: %{delay: 20})
     loop = Task.async(fn -> Loop.run([UserMessage.new("go")], [], cfg) end)
-    Process.sleep(100)
+    assert_receive {:event, {:message_update, {:text_delta, _, _, _}}}, 1_000
     send(loop.pid, {:abort, signal})
 
     assert [%UserMessage{}, %AssistantMessage{stop_reason: :aborted} = partial] = Task.await(loop)
-    assert Message.text(partial) != ""
+    assert Message.text(partial) =~ "one"
   end
 
   test "steering messages start the next turn; follow-ups run when the agent would stop" do
