@@ -405,3 +405,34 @@ specific instructions come last.
 
 **Consequences.** Prompt templates (Pi's `/name` markdown expansions) are left
 out; they are a UI convenience, not part of the runtime.
+
+---
+
+## D-021 · Extensions are supervised processes; gates fail closed
+
+**Context.** Pi's extensions are TypeScript modules that register tools and
+commands, subscribe to events, and can intercept tool calls (e.g. permission
+gates, protected paths). They run in-process, so a buggy extension can take
+the agent down.
+
+**Decision.** An extension is a module implementing optional callbacks of
+the `Pie.Extension` behaviour: `init/1`, `tools/1`, `system_prompt/2`,
+`handle_event/2` (async observation) and `before_tool_call/2` (a synchronous
+gate). Each one runs in its own `Pie.Extension.Server` under a
+`:one_for_one` supervisor that sits between the session and the agent in the
+agent's tree. Servers register under `{:extensions, agent_id}` in the pub/sub
+registry, which is how the agent finds them, and subscribe to events like any
+other observer. The agent collects tools and prompt amendments at start
+(so a restarted agent picks up restarted extensions), and the loop consults
+the gates before every tool call. A gate that crashes or takes longer than 5s
+*blocks* the call. The CLI loads extensions from `.pie/extensions/*.exs` and
+`$PIE_HOME/extensions/*.exs` with `Code.require_file/1`, which works because
+the BEAM loads code at runtime.
+
+**Consequences.** A raising observer or gate crashes only its own process,
+which the supervisor restarts (tested). If an extension keeps crashing
+past the supervisor's restart limit, the agent restarts too (`rest_for_one`)
+and re-hydrates. Pi's other extension points (custom commands, UI widgets,
+context rewriting) are omitted. An extension that calls back into its agent
+while the agent is initializing can stall the agent's start for up to the
+5s gate timeout.

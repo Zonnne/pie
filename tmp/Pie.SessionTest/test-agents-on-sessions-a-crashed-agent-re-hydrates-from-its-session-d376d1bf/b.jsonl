@@ -1,3 +1,3 @@
-{"cwd":"/work","id":"0a8cdd77-68e6-b5a8-86ee-f599321e2bb3","timestamp":"2026-09-24T04:33:47.632591Z","type":"session","version":1}
-{"id":"1461262d","message":{"content":[{"text":"first","type":"text"}],"role":"user","timestamp":1790224427632},"parentId":null,"timestamp":"2026-09-24T04:33:47.632462Z","type":"message"}
-{"id":"bc006699","message":{"content":[{"text":"one","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224427632,"usage":{"cacheRead":0,"cacheWrite":0,"input":7,"output":3}},"parentId":"1461262d","timestamp":"2026-09-24T04:33:47.632684Z","type":"message"}
+{"cwd":"/work","id":"32e63a6d-83be-dd02-123b-216009556b6b","timestamp":"2026-09-24T04:35:17.728225Z","type":"session","version":1}
+{"id":"f3a602e6","message":{"content":[{"text":"first","type":"text"}],"role":"user","timestamp":1790224517727},"parentId":null,"timestamp":"2026-09-24T04:35:17.728023Z","type":"message"}
+{"id":"34b29d21","message":{"content":[{"text":"one","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224517727,"usage":{"cacheRead":0,"cacheWrite":0,"input":7,"output":3}},"parentId":"f3a602e6","timestamp":"2026-09-24T04:35:17.728322Z","type":"message"}

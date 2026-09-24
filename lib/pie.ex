@@ -17,7 +17,7 @@ defmodule Pie do
   Options: `:model` (required), `:tools`, `:system_prompt`, `:session_path`
   (a JSONL file, created lazily or resumed if it exists; `nil` keeps the
   session in memory), `:cwd`, `:stream_opts`, `:max_concurrency`,
-  `:transform_context`, `:id`.
+  `:transform_context`, `:extensions` (modules or `{module, opts}`), `:id`.
   """
   @spec start_agent(keyword()) :: {:ok, String.t()} | {:error, term()}
   def start_agent(opts) do

@@ -19,6 +19,9 @@ defmodule Pie.Agent do
   dies, the run dies with it; if the run crashes, the agent survives, reports
   `{:run_crashed, reason}` and goes idle.
 
+  Tools and the system prompt are extended at start by the agent's
+  extensions (`Pie.Extension`), which also gate every tool call.
+
   Every agent has a `Pie.Session` (layer 4). Its messages are the session's
   context projection, loaded at start, and each `message_end` is appended to
   the session *before* it is broadcast, so a subscriber never sees a message
@@ -114,14 +117,15 @@ defmodule Pie.Agent do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    id = Keyword.fetch!(opts, :id)
     session = Keyword.fetch!(opts, :session)
 
     state = %__MODULE__{
-      id: Keyword.fetch!(opts, :id),
+      id: id,
       model: Keyword.fetch!(opts, :model),
       session: session,
-      system_prompt: Keyword.get(opts, :system_prompt),
-      tools: Keyword.get(opts, :tools, []),
+      system_prompt: Pie.Extension.system_prompt(id, Keyword.get(opts, :system_prompt, "")),
+      tools: Keyword.get(opts, :tools, []) ++ Pie.Extension.tools(id),
       messages: Pie.Session.context(session),
       stream_opts: Keyword.get(opts, :stream_opts, []),
       max_concurrency: Keyword.get(opts, :max_concurrency, 4),
@@ -206,6 +210,7 @@ defmodule Pie.Agent do
   defp start_run(s, prompts) do
     run_id = make_ref()
     agent = self()
+    id = s.id
 
     config = %Loop.Config{
       model: s.model,
@@ -218,7 +223,8 @@ defmodule Pie.Agent do
       parent: agent,
       emit: &send(agent, {:run_event, run_id, &1}),
       steering: fn -> GenServer.call(agent, {:dequeue, run_id, :steering}, :infinity) end,
-      follow_up: fn -> GenServer.call(agent, {:dequeue, run_id, :follow_up}, :infinity) end
+      follow_up: fn -> GenServer.call(agent, {:dequeue, run_id, :follow_up}, :infinity) end,
+      before_tool_call: &Pie.Extension.before_tool_call(id, &1)
     }
 
     history = s.messages
