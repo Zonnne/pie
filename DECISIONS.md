@@ -490,3 +490,48 @@ loads a skill with the ordinary `read` tool. There is no skill runtime at all.
 **Consequences.** Skills cost two lines of context until they are used. The
 frontmatter parser handles single-line values only; multi-line YAML
 descriptions are not supported.
+
+---
+
+## D-024 · The UI is a thin client of the event stream
+
+**Context.** Pi ships a full terminal UI (differential rendering, editor,
+overlays) plus print, JSON and RPC modes, all built on the same agent
+session.
+
+**Decision.** `Pie.CLI` is the only module that knows about terminals, and
+it only consumes the layers below. Interactive mode is two processes: a
+reader turns stdin lines into messages, and the main process renders
+events as they arrive. That is why typing while the agent works just works:
+it becomes `steer/2`. EOF means "finish, then exit", so pie composes in
+pipes. `--print` prints the final answer; `--mode json` prints every
+lifecycle event as a JSON line (`Pie.Agent.Event.to_json/1`), which is layer 3
+made visible and scriptable. It builds as an escript. A closed stdout
+(`| head`) exits quietly instead of crashing.
+
+**Consequences.** No TUI: output is streamed text with ANSI colours, and
+typed input interleaves with output. Ctrl-C reaches the BEAM's break handler,
+so `/abort` and `/quit` are the way to stop. An end-to-end test drives the
+CLI against the fake HTTP server through a real bash tool call.
+
+---
+
+## D-025 · Flakiness is a bug report; shake the suite until it is quiet
+
+**Context.** A concurrent runtime tested with real processes, ports, sockets
+and timers will have races, some in the code and some in the tests.
+
+**Decision.** Every layer was run under `mix test --repeat-until-failure`
+(100–200 iterations) before its commit, and each flake was chased to a root
+cause instead of retried. Real bugs this found: a stray `:httpc` chunk left
+in the consumer's mailbox (a 3-tuple matched as a 2-tuple); `Port.info/2`
+returning `nil` for commands that had already exited; a window where a
+killed tool process could orphan its shell command (fixed by having the
+port's owner monitor the tool process *before* opening the port); and
+`setsid(1)` forking and hiding exit codes. Test-only races were fixed by
+waiting for events instead of sleeping, and by asserting properties
+(overlap) rather than one interleaving.
+
+**Consequences.** The suite is deterministic under load, and the log above
+explains the less obvious lines of code (the drain loop, the runner
+process, the unlinking of finished tasks).
