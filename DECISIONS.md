@@ -387,3 +387,21 @@ stale pids. `Pie.stop_agent/1` terminates the whole tree.
 supervisor's restart order plus D-018. Tests kill the agent and the session
 mid-conversation and continue talking. An in-memory session that crashes
 loses its history, which is the price of `path: nil`.
+
+---
+
+## D-020 · A small system prompt; project knowledge lives in AGENTS.md
+
+**Context.** Pi's system prompt is short: identity, tools, a handful of
+guidelines. Pi's position is that frontier models already know how to be
+coding agents, and that every token of instruction competes with the task.
+
+**Decision.** `Pie.Prompt.build/1` produces: identity, one line per tool
+(the first sentence of its description), guidelines only for tools that are
+present, the project's instruction files, then date and working directory.
+Instruction files are `AGENTS.md` (or `CLAUDE.md`) from `$PIE_HOME` and from
+every directory between `/` and the cwd, outermost first, so the most
+specific instructions come last.
+
+**Consequences.** Prompt templates (Pi's `/name` markdown expansions) are left
+out; they are a UI convenience, not part of the runtime.
