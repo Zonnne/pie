@@ -149,7 +149,7 @@ defmodule Pie.Agent.Loop do
 
   defp check_parent(%Config{parent: parent}) do
     receive do
-      {:EXIT, ^parent, reason} -> exit(reason)
+      {:EXIT, ^parent, reason} -> exit({:shutdown, {:parent_exited, reason}})
     after
       0 -> :ok
     end

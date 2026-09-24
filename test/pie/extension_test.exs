@@ -122,7 +122,13 @@ defmodule Pie.ExtensionTest do
 
   @tag :tmp_dir
   test "the protected-paths example loads from a file and blocks writes", %{tmp_dir: dir} do
-    [{module, _}] = Code.require_file("examples/extensions/protected_paths.exs")
+    # nil when an earlier (repeated) run already loaded the file.
+    module =
+      case Code.require_file("examples/extensions/protected_paths.exs") do
+        [{module, _}] -> module
+        nil -> ProtectedPaths
+      end
+
     assert Pie.Extension.extension?(module)
     refute Pie.Extension.extension?(Enum)
 

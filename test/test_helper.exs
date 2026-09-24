@@ -3,4 +3,5 @@ File.mkdir_p!(tmp)
 System.put_env("PIE_HOME", tmp)
 System.delete_env("ANTHROPIC_BASE_URL")
 
-ExUnit.start()
+# Generous receive timeout: several tests wait on real processes and ports.
+ExUnit.start(assert_receive_timeout: 1_000)

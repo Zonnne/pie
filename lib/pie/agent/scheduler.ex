@@ -137,7 +137,7 @@ defmodule Pie.Agent.Scheduler do
 
       {:EXIT, ^parent, reason} ->
         abort_all(state)
-        exit(reason)
+        exit({:shutdown, {:parent_exited, reason}})
 
       {:EXIT, _pid, _reason} ->
         # A linked tool task exited; its reply or :DOWN carries the outcome.

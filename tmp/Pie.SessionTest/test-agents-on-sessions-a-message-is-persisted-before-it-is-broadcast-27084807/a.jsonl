@@ -1,3 +1,0 @@
-{"cwd":"/work","id":"d4f80fc0-0048-24ba-5f2f-438b347e353b","timestamp":"2026-09-24T04:35:17.726297Z","type":"session","version":1}
-{"id":"e36ef5f9","message":{"content":[{"text":"hello","type":"text"}],"role":"user","timestamp":1790224517725},"parentId":null,"timestamp":"2026-09-24T04:35:17.726011Z","type":"message"}
-{"id":"f3643e30","message":{"content":[{"text":"reply","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224517725,"usage":{"cacheRead":0,"cacheWrite":0,"input":7,"output":3}},"parentId":"e36ef5f9","timestamp":"2026-09-24T04:35:17.726767Z","type":"message"}

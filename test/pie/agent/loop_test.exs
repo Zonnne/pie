@@ -152,16 +152,12 @@ defmodule Pie.Agent.LoopTest do
     calls = for name <- ["r1", "r2", "w", "r3"], do: {:tool_call, name, %{}}
     Loop.run([UserMessage.new("go")], [], config([calls, "done"], tools: tools))
 
-    assert log |> Agent.get(& &1) |> Enum.reverse() == [
-             {:start, "r1"},
-             {:start, "r2"},
-             {:stop, "r1"},
-             {:stop, "r2"},
-             {:start, "w"},
-             {:stop, "w"},
-             {:start, "r3"},
-             {:stop, "r3"}
-           ]
+    # r1 and r2 overlap (finishing in either order); w waits for both and
+    # runs alone; r3 waits for w.
+    [a, b, c, d | rest] = log |> Agent.get(& &1) |> Enum.reverse()
+    assert Enum.sort([a, b]) == [start: "r1", start: "r2"]
+    assert Enum.sort([c, d]) == [stop: "r1", stop: "r2"]
+    assert rest == [start: "w", stop: "w", start: "r3", stop: "r3"]
   end
 
   test "aborting during tools kills running tools and skips queued ones" do

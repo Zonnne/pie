@@ -1,3 +1,0 @@
-{"cwd":"/work","id":"32e63a6d-83be-dd02-123b-216009556b6b","timestamp":"2026-09-24T04:35:17.728225Z","type":"session","version":1}
-{"id":"f3a602e6","message":{"content":[{"text":"first","type":"text"}],"role":"user","timestamp":1790224517727},"parentId":null,"timestamp":"2026-09-24T04:35:17.728023Z","type":"message"}
-{"id":"34b29d21","message":{"content":[{"text":"one","type":"text"}],"errorMessage":null,"model":"faux","provider":"faux","role":"assistant","stopReason":"stop","timestamp":1790224517727,"usage":{"cacheRead":0,"cacheWrite":0,"input":7,"output":3}},"parentId":"f3a602e6","timestamp":"2026-09-24T04:35:17.728322Z","type":"message"}
